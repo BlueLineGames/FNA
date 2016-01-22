@@ -10,6 +10,7 @@
 #region Using Statements
 using System;
 using System.Collections.Generic;
+using BlueLine;
 #endregion
 
 namespace Microsoft.Xna.Framework.Graphics
@@ -103,7 +104,15 @@ namespace Microsoft.Xna.Framework.Graphics
 		public void Dispose()
 		{
 			// Dispose of managed objects as well
-			Dispose(true);
+            if ((this.Name != "Shaders/DeferredRendering/DeferredParticleEffect") // BlueLine Hack to workaround Mojoshader bug
+                && (this.Name != "Shaders/DeferredRendering/DeferredUnlit"))
+            {
+                if (!String.IsNullOrEmpty(this.Name))
+                {
+                    Logger.log(LogLevel.FEATURE_SPECIFIC, "Disposing of GraphicsResource v2: " + this.Name); // By BlueLine to debug another Mojoshader issue
+                }
+                Dispose(true);
+            }
 			// Since we have been manually disposed, do not call the finalizer on this object
 			GC.SuppressFinalize(this);
 		}
