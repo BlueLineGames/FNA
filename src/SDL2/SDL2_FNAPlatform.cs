@@ -25,15 +25,15 @@ namespace Microsoft.Xna.Framework
 {
 	internal static class SDL2_FNAPlatform
 	{
-		#region Public Static Constants
+		#region Static Constants
 
-		public static readonly string OSVersion = SDL.SDL_GetPlatform();
+		private static readonly string OSVersion = SDL.SDL_GetPlatform();
 
 		#endregion
 
 		#region Public Static Methods
 
-		public static void Init(Game game)
+		public static void ProgramInit()
 		{
 			/* SDL2 might complain if an OS that uses SDL_main has not actually
 			 * used SDL_main by the time you initialize SDL2.
@@ -42,6 +42,18 @@ namespace Microsoft.Xna.Framework
 			 * -flibit
 			 */
 			SDL.SDL_SetMainReady();
+
+			// If available, load the SDL_GameControllerDB
+			string mappingsDB = Path.Combine(
+				TitleContainer.Location,
+				"gamecontrollerdb.txt"
+			);
+			if (File.Exists(mappingsDB))
+			{
+				SDL.SDL_GameControllerAddMappingsFromFile(
+					mappingsDB
+				);
+			}
 
 			// This _should_ be the first real SDL call we make...
 			SDL.SDL_Init(
@@ -61,26 +73,38 @@ namespace Microsoft.Xna.Framework
 				);
 			}
 
-			// If available, load the SDL_GameControllerDB
-			string mappingsDB = Path.Combine(
-				TitleContainer.Location,
-				"gamecontrollerdb.txt"
-			);
-			if (File.Exists(mappingsDB))
-			{
-				SDL.SDL_GameControllerAddMappingsFromFile(
-					mappingsDB
-				);
+			// We want to initialize the controllers ASAP!
+			SDL.SDL_Event[] evt = new SDL.SDL_Event[1];
+			SDL.SDL_PumpEvents();
+			while (SDL.SDL_PeepEvents(
+				evt,
+				1,
+				SDL.SDL_eventaction.SDL_GETEVENT,
+				SDL.SDL_EventType.SDL_CONTROLLERDEVICEADDED,
+				SDL.SDL_EventType.SDL_CONTROLLERDEVICEADDED
+			) == 1) {
+				INTERNAL_AddInstance(evt[0].cdevice.which);
 			}
+		}
 
-			// Set and initialize the SDL2 window
+		public static void ProgramExit(object sender, EventArgs e)
+		{
+			// This _should_ be the last SDL call we make...
+			SDL.SDL_Quit();
+		}
+
+		public static GameWindow CreateWindow()
+		{
+			// GLContext environment variables
 			bool forceES2 = Environment.GetEnvironmentVariable(
 				"FNA_OPENGL_FORCE_ES2"
 			) == "1";
 			bool forceCoreProfile = Environment.GetEnvironmentVariable(
 				"FNA_OPENGL_FORCE_CORE_PROFILE"
 			) == "1";
-			game.Window = new SDL2_GameWindow(
+
+			// Set and initialize the SDL2 window
+			GameWindow result = new SDL2_GameWindow(
 				forceES2 ||
 				OSVersion.Equals("Emscripten") ||
 				OSVersion.Equals("Android") ||
@@ -93,30 +117,24 @@ namespace Microsoft.Xna.Framework
 
 			// We hide the mouse cursor by default.
 			SDL.SDL_ShowCursor(0);
+
+			return result;
 		}
 
-		public static void Dispose(Game game)
+		public static void DisposeWindow(GameWindow window)
 		{
-			if (game.Window != null)
-			{
-				/* Some window managers might try to minimize the window as we're
-				 * destroying it. This looks pretty stupid and could cause problems,
-				 * so set this hint right before we destroy everything.
-				 * -flibit
-				 */
-				SDL.SDL_SetHintWithPriority(
-					SDL.SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS,
-					"0",
-					SDL.SDL_HintPriority.SDL_HINT_OVERRIDE
-				);
+			/* Some window managers might try to minimize the window as we're
+			 * destroying it. This looks pretty stupid and could cause problems,
+			 * so set this hint right before we destroy everything.
+			 * -flibit
+			 */
+			SDL.SDL_SetHintWithPriority(
+				SDL.SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS,
+				"0",
+				SDL.SDL_HintPriority.SDL_HINT_OVERRIDE
+			);
 
-				SDL.SDL_DestroyWindow(game.Window.Handle);
-
-				game.Window = null;
-			}
-
-			// This _should_ be the last SDL call we make...
-			SDL.SDL_Quit();
+			SDL.SDL_DestroyWindow(window.Handle);
 		}
 
 		public static void RunLoop(Game game)
@@ -146,18 +164,38 @@ namespace Microsoft.Xna.Framework
 			) == "1";
 			if (SDL2_KeyboardUtil.UseScancodes)
 			{
-				Log("Using scancodes instead of keycodes!");
+				FNAPlatform.Log("Using scancodes instead of keycodes!");
 			}
 
 			// Active Key List
 			List<Keys> keys = new List<Keys>();
 
 			/* Setup Text Input Control Character Arrays
-			 * (Only 4 control keys supported at this time)
+			 * (Only 7 control keys supported at this time)
 			 */
-			bool[] INTERNAL_TextInputControlDown = new bool[4];
-			int[] INTERNAL_TextInputControlRepeat = new int[4];
-			bool INTERNAL_TextInputSuppress = false;
+			char[] textInputCharacters = new char[]
+			{
+				(char) 2,	// Home
+				(char) 3,	// End
+				(char) 8,	// Backspace
+				(char) 9,	// Tab
+				(char) 13,	// Enter
+				(char) 127,	// Delete
+				(char) 22	// Ctrl+V (Paste)
+			};
+			Dictionary<Keys, int> textInputBindings = new Dictionary<Keys, int>()
+			{
+				{ Keys.Home,	0 },
+				{ Keys.End,	1 },
+				{ Keys.Back,	2 },
+				{ Keys.Tab,	3 },
+				{ Keys.Enter,	4 },
+				{ Keys.Delete,	5 }
+				// Ctrl+V is special!
+			};
+			bool[] textInputControlDown = new bool[textInputCharacters.Length];
+			int[] textInputControlRepeat = new int[textInputCharacters.Length];
+			bool textInputSuppress = false;
 
 			SDL.SDL_Event evt;
 
@@ -172,30 +210,19 @@ namespace Microsoft.Xna.Framework
 						if (!keys.Contains(key))
 						{
 							keys.Add(key);
-							if (key == Keys.Back)
+							if (textInputBindings.ContainsKey(key))
 							{
-								INTERNAL_TextInputControlDown[0] = true;
-								INTERNAL_TextInputControlRepeat[0] = Environment.TickCount + 400;
-								TextInputEXT.OnTextInput((char) 8); // Backspace
-							}
-							else if (key == Keys.Tab)
-							{
-								INTERNAL_TextInputControlDown[1] = true;
-								INTERNAL_TextInputControlRepeat[1] = Environment.TickCount + 400;
-								TextInputEXT.OnTextInput((char) 9); // Tab
-							}
-							else if (key == Keys.Enter)
-							{
-								INTERNAL_TextInputControlDown[2] = true;
-								INTERNAL_TextInputControlRepeat[2] = Environment.TickCount + 400;
-								TextInputEXT.OnTextInput((char) 13); // Enter
+								int textIndex = textInputBindings[key];
+								textInputControlDown[textIndex] = true;
+								textInputControlRepeat[textIndex] = Environment.TickCount + 400;
+								TextInputEXT.OnTextInput(textInputCharacters[textIndex]);
 							}
 							else if (keys.Contains(Keys.LeftControl) && key == Keys.V)
 							{
-								INTERNAL_TextInputControlDown[3] = true;
-								INTERNAL_TextInputControlRepeat[3] = Environment.TickCount + 400;
-								TextInputEXT.OnTextInput((char) 22); // Control-V (Paste)
-								INTERNAL_TextInputSuppress = true;
+								textInputControlDown[6] = true;
+								textInputControlRepeat[6] = Environment.TickCount + 400;
+								TextInputEXT.OnTextInput(textInputCharacters[6]);
+								textInputSuppress = true;
 							}
 						}
 					}
@@ -204,22 +231,14 @@ namespace Microsoft.Xna.Framework
 						Keys key = SDL2_KeyboardUtil.ToXNA(ref evt.key.keysym);
 						if (keys.Remove(key))
 						{
-							if (key == Keys.Back)
+							if (textInputBindings.ContainsKey(key))
 							{
-								INTERNAL_TextInputControlDown[0] = false;
+								textInputControlDown[textInputBindings[key]] = false;
 							}
-							else if (key == Keys.Tab)
+							else if ((!keys.Contains(Keys.LeftControl) && textInputControlDown[3]) || key == Keys.V)
 							{
-								INTERNAL_TextInputControlDown[1] = false;
-							}
-							else if (key == Keys.Enter)
-							{
-								INTERNAL_TextInputControlDown[2] = false;
-							}
-							else if ((!keys.Contains(Keys.LeftControl) && INTERNAL_TextInputControlDown[3]) || key == Keys.V)
-							{
-								INTERNAL_TextInputControlDown[3] = false;
-								INTERNAL_TextInputSuppress = false;
+								textInputControlDown[6] = false;
+								textInputSuppress = false;
 							}
 						}
 					}
@@ -348,7 +367,7 @@ namespace Microsoft.Xna.Framework
 					}
 
 					// Text Input
-					else if (evt.type == SDL.SDL_EventType.SDL_TEXTINPUT && !INTERNAL_TextInputSuppress)
+					else if (evt.type == SDL.SDL_EventType.SDL_TEXTINPUT && !textInputSuppress)
 					{
 						string text;
 
@@ -379,21 +398,12 @@ namespace Microsoft.Xna.Framework
 					}
 				}
 				// Text Input Controls Key Handling
-				if (INTERNAL_TextInputControlDown[0] && INTERNAL_TextInputControlRepeat[0] <= Environment.TickCount)
+				for (int i = 0; i < textInputCharacters.Length; i += 1)
 				{
-					TextInputEXT.OnTextInput((char) 8);
-				}
-				if (INTERNAL_TextInputControlDown[1] && INTERNAL_TextInputControlRepeat[1] <= Environment.TickCount)
-				{
-					TextInputEXT.OnTextInput((char) 9);
-				}
-				if (INTERNAL_TextInputControlDown[2] && INTERNAL_TextInputControlRepeat[2] <= Environment.TickCount)
-				{
-					TextInputEXT.OnTextInput((char) 13);
-				}
-				if (INTERNAL_TextInputControlDown[3] && INTERNAL_TextInputControlRepeat[3] <= Environment.TickCount)
-				{
-					TextInputEXT.OnTextInput((char) 22);
+					if (textInputControlDown[i] && textInputControlRepeat[i] <= Environment.TickCount)
+					{
+						TextInputEXT.OnTextInput(textInputCharacters[i]);
+					}
 				}
 
 				Keyboard.SetKeys(keys);
@@ -402,22 +412,6 @@ namespace Microsoft.Xna.Framework
 
 			// We out.
 			game.Exit();
-		}
-
-		public static void BeforeInitialize()
-		{
-			// We want to initialize the controllers ASAP!
-			SDL.SDL_Event[] evt = new SDL.SDL_Event[1];
-			SDL.SDL_PumpEvents(); // Required to get OSX device events this early.
-			while (SDL.SDL_PeepEvents(
-				evt,
-				1,
-				SDL.SDL_eventaction.SDL_GETEVENT,
-				SDL.SDL_EventType.SDL_CONTROLLERDEVICEADDED,
-				SDL.SDL_EventType.SDL_CONTROLLERDEVICEADDED
-			) == 1) {
-				INTERNAL_AddInstance(evt[0].cdevice.which);
-			}
 		}
 
 		public static IGLDevice CreateGLDevice(
@@ -435,7 +429,7 @@ namespace Microsoft.Xna.Framework
 			}
 			catch(DllNotFoundException e)
 			{
-				Log("OpenAL not found! Need FNA.dll.config?");
+				FNAPlatform.Log("OpenAL not found! Need FNA.dll.config?");
 				throw e;
 			}
 			catch(Exception)
@@ -460,11 +454,11 @@ namespace Microsoft.Xna.Framework
 				{
 					if (SDL.SDL_GL_SetSwapInterval(-1) != -1)
 					{
-						Log("Using EXT_swap_control_tear VSync!");
+						FNAPlatform.Log("Using EXT_swap_control_tear VSync!");
 					}
 					else
 					{
-						Log("EXT_swap_control_tear unsupported. Fall back to standard VSync.");
+						FNAPlatform.Log("EXT_swap_control_tear unsupported. Fall back to standard VSync.");
 						SDL.SDL_ClearError();
 						SDL.SDL_GL_SetSwapInterval(1);
 					}
@@ -492,7 +486,7 @@ namespace Microsoft.Xna.Framework
 			{
 				List<DisplayMode> modes = new List<DisplayMode>();
 				int numModes = SDL.SDL_GetNumDisplayModes(i);
-				for (int j = 0; j < numModes; j += 1)
+				for (int j = numModes - 1; j >= 0; j -= 1)
 				{
 					SDL.SDL_GetDisplayMode(i, j, out filler);
 
@@ -530,11 +524,6 @@ namespace Microsoft.Xna.Framework
 			return adapters;
 		}
 
-		public static Keys GetKeyFromScancode(Keys scancode)
-		{
-			return SDL2_KeyboardUtil.KeyFromScancode(scancode);
-		}
-
 		public static void GetMouseState(
 			out int x,
 			out int y,
@@ -550,11 +539,6 @@ namespace Microsoft.Xna.Framework
 			right =		(ButtonState) ((flags & SDL.SDL_BUTTON_RMASK) >> 2);
 			x1 =		(ButtonState) ((flags & SDL.SDL_BUTTON_X1MASK) >> 3);
 			x2 =		(ButtonState) ((flags & SDL.SDL_BUTTON_X2MASK) >> 4);
-		}
-
-		public static void SetMousePosition(IntPtr window, int x, int y)
-		{
-			SDL.SDL_WarpMouseInWindow(window, x, y);
 		}
 
 		public static void OnIsMouseVisibleChanged(bool visible)
@@ -622,11 +606,6 @@ namespace Microsoft.Xna.Framework
 				}
 			}
 			throw new NotSupportedException("Unhandled SDL2 platform");
-		}
-
-		public static void Log(string Message)
-		{
-			Console.WriteLine(Message);
 		}
 
 		public static void ShowRuntimeError(string title, string message)
@@ -1235,7 +1214,7 @@ namespace Microsoft.Xna.Framework
 				INTERNAL_haptics[which] = SDL.SDL_HapticOpenFromJoystick(thisJoystick);
 				if (INTERNAL_haptics[which] == IntPtr.Zero)
 				{
-					Log("HAPTIC OPEN ERROR: " + SDL.SDL_GetError());
+					FNAPlatform.Log("HAPTIC OPEN ERROR: " + SDL.SDL_GetError());
 				}
 			}
 			if (INTERNAL_haptics[which] != IntPtr.Zero)
@@ -1390,7 +1369,7 @@ namespace Microsoft.Xna.Framework
 			}
 
 			// Print controller information to stdout.
-			Log(
+			FNAPlatform.Log(
 				"Controller " + which.ToString() + ": " +
 				SDL.SDL_GameControllerName(INTERNAL_devices[which])
 			);
@@ -1418,7 +1397,7 @@ namespace Microsoft.Xna.Framework
 			// A lot of errors can happen here, but honestly, they can be ignored...
 			SDL.SDL_ClearError();
 
-			Log("Removed device, player: " + output.ToString());
+			FNAPlatform.Log("Removed device, player: " + output.ToString());
 		}
 
 		// GetState can convert stick values to button values

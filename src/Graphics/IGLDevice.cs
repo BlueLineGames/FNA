@@ -148,12 +148,14 @@ namespace Microsoft.Xna.Framework.Graphics
 		);
 		void ResolveTarget(RenderTargetBinding target);
 
-		void ReadBackbuffer<T>(
-			T[] data,
+		void ReadBackbuffer(
+			IntPtr data,
+			int dataLen,
 			int startIndex,
 			int elementCount,
+			int elementSizeInBytes,
 			Rectangle? rect
-		) where T : struct;
+		);
 
 		IGLTexture CreateTexture2D(
 			SurfaceFormat format,
@@ -174,7 +176,7 @@ namespace Microsoft.Xna.Framework.Graphics
 			int levelCount
 		);
 		void AddDisposeTexture(IGLTexture texture);
-		void SetTextureData2D<T>(
+		void SetTextureData2D(
 			IGLTexture texture,
 			SurfaceFormat format,
 			int x,
@@ -182,11 +184,12 @@ namespace Microsoft.Xna.Framework.Graphics
 			int w,
 			int h,
 			int level,
-			T[] data,
+			IntPtr data,
 			int startIndex,
-			int elementCount
-		) where T : struct;
-		void SetTextureData3D<T>(
+			int elementCount,
+			int elementSizeInBytes
+		);
+		void SetTextureData3D(
 			IGLTexture texture,
 			SurfaceFormat format,
 			int level,
@@ -196,11 +199,12 @@ namespace Microsoft.Xna.Framework.Graphics
 			int bottom,
 			int front,
 			int back,
-			T[] data,
+			IntPtr data,
 			int startIndex,
-			int elementCount
-		) where T : struct;
-		void SetTextureDataCube<T>(
+			int elementCount,
+			int elementSizeInBytes
+		);
+		void SetTextureDataCube(
 			IGLTexture texture,
 			SurfaceFormat format,
 			int xOffset,
@@ -209,34 +213,37 @@ namespace Microsoft.Xna.Framework.Graphics
 			int height,
 			CubeMapFace cubeMapFace,
 			int level,
-			T[] data,
+			IntPtr data,
 			int startIndex,
-			int elementCount
-		) where T : struct;
+			int elementCount,
+			int elementSizeInBytes
+		);
 		void SetTextureData2DPointer(Texture2D texture, IntPtr ptr);
-		void GetTextureData2D<T>(
+		void GetTextureData2D(
 			IGLTexture texture,
 			SurfaceFormat format,
 			int width,
 			int height,
 			int level,
 			Rectangle? rect,
-			T[] data,
+			IntPtr data,
 			int startIndex,
-			int elementCount
-		) where T : struct;
-		// void GetTextureData3D<T>();
-		void GetTextureDataCube<T>(
+			int elementCount,
+			int elementSizeInBytes
+		);
+		// void GetTextureData3D();
+		void GetTextureDataCube(
 			IGLTexture texture,
 			SurfaceFormat format,
 			int size,
 			CubeMapFace cubeMapFace,
 			int level,
 			Rectangle? rect,
-			T[] data,
+			IntPtr data,
 			int startIndex,
-			int elementCount
-		) where T : struct;
+			int elementCount,
+			int elementSizeInBytes
+		);
 
 		IGLRenderbuffer GenRenderbuffer(
 			int width,
@@ -258,23 +265,24 @@ namespace Microsoft.Xna.Framework.Graphics
 			int vertexStride
 		);
 		void AddDisposeVertexBuffer(IGLBuffer buffer);
-		void SetVertexBufferData<T>(
+		void SetVertexBufferData(
 			IGLBuffer buffer,
+			int offsetInBytes,
+			IntPtr data,
+			int startIndex,
+			int elementCount,
 			int elementSizeInBytes,
-			int offsetInBytes,
-			T[] data,
-			int startIndex,
-			int elementCount,
 			SetDataOptions options
-		) where T : struct;
-		void GetVertexBufferData<T>(
+		);
+		void GetVertexBufferData(
 			IGLBuffer buffer,
 			int offsetInBytes,
-			T[] data,
+			IntPtr data,
 			int startIndex,
 			int elementCount,
+			int elementSizeInBytes,
 			int vertexStride
-		) where T : struct;
+		);
 
 		IGLBuffer GenIndexBuffer(
 			bool dynamic,
@@ -282,21 +290,23 @@ namespace Microsoft.Xna.Framework.Graphics
 			IndexElementSize indexElementSize
 		);
 		void AddDisposeIndexBuffer(IGLBuffer buffer);
-		void SetIndexBufferData<T>(
+		void SetIndexBufferData(
 			IGLBuffer buffer,
 			int offsetInBytes,
-			T[] data,
+			IntPtr data,
 			int startIndex,
 			int elementCount,
+			int elementSizeInBytes,
 			SetDataOptions options
-		) where T : struct;
-		void GetIndexBufferData<T>(
+		);
+		void GetIndexBufferData(
 			IGLBuffer buffer,
 			int offsetInBytes,
-			T[] data,
+			IntPtr data,
 			int startIndex,
-			int elementCount
-		) where T : struct;
+			int elementCount,
+			int elementSizeInBytes
+		);
 
 		IGLEffect CreateEffect(byte[] effectCode);
 		IGLEffect CloneEffect(IGLEffect effect);

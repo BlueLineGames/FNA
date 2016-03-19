@@ -107,9 +107,42 @@ namespace Microsoft.Xna.Framework.Graphics
 			ColumnCount = columnCount;
 			if (elementCount > 0)
 			{
+				int curOffset = 0;
 				List<EffectParameter> elements = new List<EffectParameter>(elementCount);
 				for (int i = 0; i < elementCount; i += 1)
 				{
+					EffectParameterCollection elementMembers = null;
+					if (structureMembers != null)
+					{
+						List<EffectParameter> memList = new List<EffectParameter>();
+						for (int j = 0; j < structureMembers.Count; j += 1)
+						{
+							int memElems = 0;
+							if (structureMembers[j].Elements != null)
+							{
+								memElems = structureMembers[j].Elements.Count;
+							}
+							memList.Add(new EffectParameter(
+								structureMembers[j].Name,
+								structureMembers[j].Semantic,
+								structureMembers[j].RowCount,
+								structureMembers[j].ColumnCount,
+								memElems,
+								structureMembers[j].ParameterClass,
+								structureMembers[j].ParameterType,
+								null, // FIXME: Nested structs! -flibit
+								structureMembers[j].Annotations,
+								new IntPtr(data.ToInt64() + curOffset)
+							));
+							int memSize = structureMembers[j].RowCount * structureMembers[j].ColumnCount;
+							if (memElems > 0)
+							{
+								memSize *= memElems;
+							}
+							curOffset += memSize * 4;
+						}
+						elementMembers = new EffectParameterCollection(memList);
+					}
 					// FIXME: Probably incomplete? -flibit
 					elements.Add(new EffectParameter(
 						null,
@@ -119,10 +152,10 @@ namespace Microsoft.Xna.Framework.Graphics
 						0,
 						ParameterClass,
 						parameterType,
-						null, // FIXME: See mojoshader_effects.c:readvalue -flibit
+						elementMembers,
 						null,
 						new IntPtr(
-							data.ToInt64() + (i * rowCount * columnCount)
+							data.ToInt64() + (i * 4 * rowCount * columnCount)
 						)
 					));
 				}
@@ -881,6 +914,13 @@ namespace Microsoft.Xna.Framework.Graphics
 					dstPtr[10] = value.M33;
 					dstPtr[11] = value.M34;
 				}
+				else if (ColumnCount == 2 && RowCount == 2)
+				{
+					dstPtr[0] = value.M11;
+					dstPtr[1] = value.M12;
+					dstPtr[2] = value.M21;
+					dstPtr[3] = value.M22;
+				}
 				else
 				{
 					throw new NotImplementedException(
@@ -972,6 +1012,16 @@ namespace Microsoft.Xna.Framework.Graphics
 						dstPtr[curOffset++] = value[i].M34;
 					}
 				}
+				else if (ColumnCount == 2 && RowCount == 2)
+				{
+					for (int i = 0; i < value.Length; i += 1)
+					{
+						dstPtr[curOffset++] = value[i].M11;
+						dstPtr[curOffset++] = value[i].M12;
+						dstPtr[curOffset++] = value[i].M21;
+						dstPtr[curOffset++] = value[i].M22;
+					}
+				}
 				else
 				{
 					throw new NotImplementedException(
@@ -1049,6 +1099,13 @@ namespace Microsoft.Xna.Framework.Graphics
 					dstPtr[9] = value.M14;
 					dstPtr[10] = value.M24;
 					dstPtr[11] = value.M34;
+				}
+				else if (ColumnCount == 2 && RowCount == 2)
+				{
+					dstPtr[0] = value.M11;
+					dstPtr[1] = value.M21;
+					dstPtr[2] = value.M12;
+					dstPtr[3] = value.M22;
 				}
 				else
 				{
@@ -1139,6 +1196,16 @@ namespace Microsoft.Xna.Framework.Graphics
 						dstPtr[curOffset++] = value[i].M14;
 						dstPtr[curOffset++] = value[i].M24;
 						dstPtr[curOffset++] = value[i].M34;
+					}
+				}
+				else if (ColumnCount == 2 && RowCount == 2)
+				{
+					for (int i = 0; i < value.Length; i += 1)
+					{
+						dstPtr[curOffset++] = value[i].M11;
+						dstPtr[curOffset++] = value[i].M21;
+						dstPtr[curOffset++] = value[i].M12;
+						dstPtr[curOffset++] = value[i].M22;
 					}
 				}
 				else

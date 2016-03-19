@@ -219,56 +219,71 @@ namespace Microsoft.Xna.Framework
 				return;
 			}
 
-			// We're about to reset a device, notify the application.
-			OnDeviceResetting(this, EventArgs.Empty);
+			// Recreate device information before resetting
+			GraphicsDeviceInformation gdi = new GraphicsDeviceInformation();
+			gdi.Adapter = GraphicsDevice.Adapter;
+			gdi.GraphicsProfile = GraphicsDevice.GraphicsProfile;
+			gdi.PresentationParameters = GraphicsDevice.PresentationParameters.Clone();
 
-			// Apply the GraphicsDevice changes internally.
-			GraphicsDevice.PresentationParameters.BackBufferFormat =
+			/* Apply the GraphicsDevice changes to the new Parameters.
+			 * Note that PreparingDeviceSettings can override any of these!
+			 * -flibit
+			 */
+			gdi.PresentationParameters.BackBufferFormat =
 				PreferredBackBufferFormat;
-			GraphicsDevice.PresentationParameters.BackBufferWidth =
+			gdi.PresentationParameters.BackBufferWidth =
 				PreferredBackBufferWidth;
-			GraphicsDevice.PresentationParameters.BackBufferHeight =
+			gdi.PresentationParameters.BackBufferHeight =
 				PreferredBackBufferHeight;
-			GraphicsDevice.PresentationParameters.DepthStencilFormat =
+			gdi.PresentationParameters.DepthStencilFormat =
 				PreferredDepthStencilFormat;
-			GraphicsDevice.PresentationParameters.IsFullScreen =
+			gdi.PresentationParameters.IsFullScreen =
 				IsFullScreen;
 			if (!PreferMultiSampling)
 			{
-				GraphicsDevice.PresentationParameters.MultiSampleCount = 0;
+				gdi.PresentationParameters.MultiSampleCount = 0;
 			}
-			else if (GraphicsDevice.PresentationParameters.MultiSampleCount == 0)
+			else if (gdi.PresentationParameters.MultiSampleCount == 0)
 			{
 				/* XNA4 seems to have an upper limit of 8, but I'm willing to
 				 * limit this only in GraphicsDeviceManager's default setting.
 				 * If you want even higher values, Reset() with a custom value.
 				 * -flibit
 				 */
-				GraphicsDevice.PresentationParameters.MultiSampleCount = Math.Min(
+				gdi.PresentationParameters.MultiSampleCount = Math.Min(
 					GraphicsDevice.GLDevice.MaxMultiSampleCount,
 					8
 				);
 			}
 
+			// Give the user a chance to override the above settings.
+			OnPreparingDeviceSettings(
+				this,
+				new PreparingDeviceSettingsEventArgs(gdi)
+			);
+
+			// We're about to reset a device, notify the application.
+			OnDeviceResetting(this, EventArgs.Empty);
+
 			// Make the Platform device changes.
 			game.Window.BeginScreenDeviceChange(
-				GraphicsDevice.PresentationParameters.IsFullScreen
+				gdi.PresentationParameters.IsFullScreen
 			);
 			game.Window.EndScreenDeviceChange(
-				"FNA",
-				GraphicsDevice.PresentationParameters.BackBufferWidth,
-				GraphicsDevice.PresentationParameters.BackBufferHeight
+				gdi.Adapter.Description, // FIXME: Should be Name! -flibit
+				gdi.PresentationParameters.BackBufferWidth,
+				gdi.PresentationParameters.BackBufferHeight
 			);
 
 			// Apply the PresentInterval.
 			FNAPlatform.SetPresentationInterval(
 				SynchronizeWithVerticalRetrace ?
-					GraphicsDevice.PresentationParameters.PresentationInterval :
+					gdi.PresentationParameters.PresentationInterval :
 					PresentInterval.Immediate
 			);
 
 			// Reset!
-			GraphicsDevice.Reset();
+			GraphicsDevice.Reset(gdi.PresentationParameters, gdi.Adapter);
 
 			// We just reset a device, notify the application.
 			OnDeviceReset(this, EventArgs.Empty);
@@ -276,32 +291,8 @@ namespace Microsoft.Xna.Framework
 
 		public void ToggleFullScreen()
 		{
-			// Change settings.
 			IsFullScreen = !IsFullScreen;
-			graphicsDevice.PresentationParameters.IsFullScreen = IsFullScreen;
-
-			/* FIXME: It almost looks like this method calls ApplyChanges...
-			 * Does it just do that instead of all this?
-			 * -flibit
-			 */
-			GraphicsDevice.PresentationParameters.BackBufferWidth =
-				PreferredBackBufferWidth;
-			GraphicsDevice.PresentationParameters.BackBufferHeight =
-				PreferredBackBufferHeight;
-
-			// Apply settings.
-			game.Window.BeginScreenDeviceChange(IsFullScreen);
-			game.Window.EndScreenDeviceChange(
-				"FNA",
-				GraphicsDevice.PresentationParameters.BackBufferWidth,
-				GraphicsDevice.PresentationParameters.BackBufferHeight
-			);
-
-			// Toggling fullscreen may have effects on the backbuffer!
-			GraphicsDevice.GLDevice.ResetBackbuffer(
-				GraphicsDevice.PresentationParameters,
-				GraphicsDevice.RenderTargetCount > 0
-			);
+			ApplyChanges();
 		}
 
 		#endregion

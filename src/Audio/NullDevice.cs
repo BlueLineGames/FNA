@@ -91,17 +91,20 @@ namespace Microsoft.Xna.Framework.Audio
 		public void SetBufferData(
 			IALBuffer buffer,
 			AudioChannels channels,
-			byte[] data,
+			IntPtr data,
+			int offset,
 			int count,
 			int sampleRate
 		) {
 			// No-op, duh.
 		}
 
-		public void SetBufferData(
+		public void SetBufferFloatData(
 			IALBuffer buffer,
 			AudioChannels channels,
-			float[] data,
+			IntPtr data,
+			int offset,
+			int count,
 			int sampleRate
 		) {
 			// No-op, duh.
@@ -216,7 +219,8 @@ namespace Microsoft.Xna.Framework.Audio
 		public void GetBufferData(
 			IALSource source,
 			IALBuffer[] buffer,
-			float[] samples,
+			IntPtr samples,
+			int samplesLen,
 			AudioChannels channels
 		) {
 			// No-op, duh.

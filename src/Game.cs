@@ -211,9 +211,6 @@ namespace Microsoft.Xna.Framework
 
 		#region Internal Fields
 
-		/* This variable solely exists for the VideoPlayer -flibit */
-		internal static Game Instance = null;
-
 		internal bool RunApplication;
 
 		#endregion
@@ -278,8 +275,6 @@ namespace Microsoft.Xna.Framework
 
 		public Game()
 		{
-			Instance = this;
-
 			AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
 
 			LaunchParameters = new LaunchParameters();
@@ -287,7 +282,7 @@ namespace Microsoft.Xna.Framework
 			_components = new GameComponentCollection();
 			_content = new ContentManager(_services);
 
-			FNAPlatform.Init(this);
+			Window = FNAPlatform.CreateWindow();
 
 			AudioDevice.Initialize();
 
@@ -349,7 +344,11 @@ namespace Microsoft.Xna.Framework
 
 					AudioDevice.Dispose();
 
-					FNAPlatform.Dispose(this);
+					if (Window != null)
+					{
+						FNAPlatform.DisposeWindow(Window);
+						Window = null;
+					}
 					Mouse.WindowHandle = IntPtr.Zero;
 
 					ContentTypeReaderManager.ClearTypeCreators();
@@ -358,7 +357,6 @@ namespace Microsoft.Xna.Framework
 				AppDomain.CurrentDomain.UnhandledException -= OnUnhandledException;
 
 				_isDisposed = true;
-				Instance = null;
 			}
 		}
 
@@ -822,7 +820,6 @@ namespace Microsoft.Xna.Framework
 				graphicsDeviceManager.CreateDevice();
 			}
 
-			FNAPlatform.BeforeInitialize();
 			Initialize();
 
 			/* We need to do this after virtual Initialize(...) is called.
@@ -1240,6 +1237,22 @@ namespace Microsoft.Xna.Framework
 				}
 
 				return object.Equals(Item, ((AddJournalEntry<T>) obj).Item);
+			}
+		}
+
+		#endregion
+
+		#region FNA Extensions
+
+		public static void LogHookEXT(Action<string> logFunc)
+		{
+			if (logFunc == null)
+			{
+				FNAPlatform.UnhookLogger();
+			}
+			else
+			{
+				FNAPlatform.Log = logFunc;
 			}
 		}
 

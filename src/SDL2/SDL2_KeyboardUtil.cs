@@ -432,7 +432,7 @@ namespace Microsoft.Xna.Framework.Input
 					return retVal;
 				}
 			}
-			SDL2_FNAPlatform.Log(
+			FNAPlatform.Log(
 				"KEY/SCANCODE MISSING FROM SDL2->XNA DICTIONARY: " +
 				key.sym.ToString() + " " +
 				key.scancode.ToString()
@@ -440,7 +440,7 @@ namespace Microsoft.Xna.Framework.Input
 			return Keys.None;
 		}
 
-		public static Keys KeyFromScancode(Keys scancode)
+		public static Keys GetKeyFromScancode(Keys scancode)
 		{
 			SDL.SDL_Scancode retVal;
 			if (INTERNAL_xnaMap.TryGetValue((int) scancode, out retVal))
@@ -449,7 +449,7 @@ namespace Microsoft.Xna.Framework.Input
 			}
 			else
 			{
-				SDL2_FNAPlatform.Log("SCANCODE MISSING FROM XNA->SDL2 DICTIONARY: " + scancode.ToString());
+				FNAPlatform.Log("SCANCODE MISSING FROM XNA->SDL2 DICTIONARY: " + scancode.ToString());
 				return Keys.None;
 			}
 		}

@@ -10,6 +10,7 @@
 #region Using Statements
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 #endregion
 
 namespace Microsoft.Xna.Framework.Audio
@@ -160,13 +161,16 @@ namespace Microsoft.Xna.Framework.Audio
 
 			// Push the data to OpenAL.
 			IALBuffer newBuf = availableBuffers.Dequeue();
+			GCHandle handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
 			AudioDevice.ALDevice.SetBufferData(
 				newBuf,
 				channels,
-				buffer, // TODO: offset -flibit
+				handle.AddrOfPinnedObject(),
+				offset,
 				count,
 				sampleRate
 			);
+			handle.Free();
 
 			// If we're already playing, queue immediately.
 			if (INTERNAL_alSource != null)
@@ -327,12 +331,15 @@ namespace Microsoft.Xna.Framework.Audio
 		{
 			if (INTERNAL_alSource != null && queuedBuffers.Count > 0)
 			{
+				GCHandle handle = GCHandle.Alloc(samples, GCHandleType.Pinned);
 				AudioDevice.ALDevice.GetBufferData(
 					INTERNAL_alSource,
 					queuedBuffers.ToArray(), // FIXME: Blech -flibit
-					samples,
+					handle.AddrOfPinnedObject(),
+					samples.Length,
 					channels
 				);
+				handle.Free();
 			}
 			else
 			{
@@ -344,8 +351,12 @@ namespace Microsoft.Xna.Framework.Audio
 
 		#region Public FNA Extension Methods
 
-		/* THIS IS AN EXTENSION OF THE XNA4 API! */
 		public void SubmitFloatBufferEXT(float[] buffer)
+		{
+			SubmitFloatBufferEXT(buffer, 0, buffer.Length);
+		}
+
+		public void SubmitFloatBufferEXT(float[] buffer, int offset, int count)
 		{
 			/* Float samples are the typical format received from decoders.
 			 * We currently use this for the VideoPlayer.
@@ -360,12 +371,16 @@ namespace Microsoft.Xna.Framework.Audio
 
 			// Push buffer to the AL.
 			IALBuffer newBuf = availableBuffers.Dequeue();
-			AudioDevice.ALDevice.SetBufferData(
+			GCHandle handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
+			AudioDevice.ALDevice.SetBufferFloatData(
 				newBuf,
 				channels,
-				buffer,
+				handle.AddrOfPinnedObject(),
+				offset,
+				count,
 				sampleRate
 			);
+			handle.Free();
 
 			// If we're already playing, queue immediately.
 			if (INTERNAL_alSource != null)

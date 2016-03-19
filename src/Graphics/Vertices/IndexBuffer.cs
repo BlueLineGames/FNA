@@ -179,13 +179,16 @@ namespace Microsoft.Xna.Framework.Graphics
 				);
 			}
 
+			GCHandle handle = GCHandle.Alloc(data, GCHandleType.Pinned);
 			GraphicsDevice.GLDevice.GetIndexBufferData(
 				buffer,
 				offsetInBytes,
-				data,
+				handle.AddrOfPinnedObject(),
 				startIndex,
-				elementCount
+				elementCount,
+				Marshal.SizeOf(typeof(T))
 			);
+			handle.Free();
 		}
 
 		#endregion
@@ -254,14 +257,17 @@ namespace Microsoft.Xna.Framework.Graphics
 				throw new InvalidOperationException("The array specified in the data parameter is not the correct size for the amount of data requested.");
 			}
 
+			GCHandle handle = GCHandle.Alloc(data, GCHandleType.Pinned);
 			GraphicsDevice.GLDevice.SetIndexBufferData(
 				buffer,
 				offsetInBytes,
-				data,
+				handle.AddrOfPinnedObject(),
 				startIndex,
 				elementCount,
+				Marshal.SizeOf(typeof(T)),
 				options
 			);
+			handle.Free();
 		}
 
 		#endregion
@@ -296,13 +302,6 @@ namespace Microsoft.Xna.Framework.Graphics
 			}
 			if (sizeInBytes == 4)
 			{
-				if (graphicsDevice.GraphicsProfile == GraphicsProfile.Reach)
-				{
-					throw new NotSupportedException(
-						"The profile does not support an elementSize of IndexElementSize.ThirtyTwoBits; " +
-						"use IndexElementSize.SixteenBits or a type that has a size of two bytes."
-					);
-				}
 				return IndexElementSize.ThirtyTwoBits;
 			}
 

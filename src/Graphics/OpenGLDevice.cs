@@ -473,6 +473,7 @@ namespace Microsoft.Xna.Framework.Graphics
 
 		private bool supportsMultisampling;
 		private bool supportsFauxBackbuffer;
+		private bool supportsBaseVertex;
 
 		#endregion
 
@@ -577,6 +578,14 @@ namespace Microsoft.Xna.Framework.Graphics
 				);
 			}
 		}
+
+		#endregion
+
+		#region memcpy Export
+
+		/* This is used a lot for GetData/Read calls... -flibit */
+		[DllImport("msvcrt.dll", CallingConvention = CallingConvention.Cdecl)]
+		private static extern void memcpy(IntPtr dst, IntPtr src, IntPtr len);
 
 		#endregion
 
@@ -1119,22 +1128,18 @@ namespace Microsoft.Xna.Framework.Graphics
 			int primitiveCount,
 			IndexBuffer indices
 		) {
-			// Unsigned short or unsigned int?
-			bool shortIndices = indices.IndexElementSize == IndexElementSize.SixteenBits;
-
 			// Bind the index buffer
 			BindIndexBuffer(indices.buffer);
 
 			// Draw!
-			glDrawRangeElements(
+			glDrawRangeElementsBaseVertex(
 				XNAToGL.Primitive[(int) primitiveType],
 				minVertexIndex,
 				minVertexIndex + numVertices - 1,
 				XNAToGL.PrimitiveVerts(primitiveType, primitiveCount),
-				shortIndices ?
-					GLenum.GL_UNSIGNED_SHORT :
-					GLenum.GL_UNSIGNED_INT,
-				(IntPtr) (startIndex * (shortIndices ? 2 : 4))
+				XNAToGL.IndexType[(int) indices.IndexElementSize],
+				(IntPtr) (startIndex * XNAToGL.IndexSize[(int) indices.IndexElementSize]),
+				baseVertex
 			);
 		}
 
@@ -1153,18 +1158,14 @@ namespace Microsoft.Xna.Framework.Graphics
 			// Bind the index buffer
 			BindIndexBuffer(indices.buffer);
 
-			// Unsigned short or unsigned int?
-			bool shortIndices = indices.IndexElementSize == IndexElementSize.SixteenBits;
-
 			// Draw!
-			glDrawElementsInstanced(
+			glDrawElementsInstancedBaseVertex(
 				XNAToGL.Primitive[(int) primitiveType],
 				XNAToGL.PrimitiveVerts(primitiveType, primitiveCount),
-				shortIndices ?
-					GLenum.GL_UNSIGNED_SHORT :
-					GLenum.GL_UNSIGNED_INT,
-				(IntPtr) (startIndex * (shortIndices ? 2 : 4)),
-				instanceCount
+				XNAToGL.IndexType[(int) indices.IndexElementSize],
+				(IntPtr) (startIndex * XNAToGL.IndexSize[(int) indices.IndexElementSize]),
+				instanceCount,
+				baseVertex
 			);
 		}
 
@@ -1194,21 +1195,16 @@ namespace Microsoft.Xna.Framework.Graphics
 			// Unbind current index buffer.
 			BindIndexBuffer(OpenGLBuffer.NullBuffer);
 
-			// Unsigned short or unsigned int?
-			bool shortIndices = indexElementSize == IndexElementSize.SixteenBits;
-
 			// Draw!
 			glDrawRangeElements(
 				XNAToGL.Primitive[(int) primitiveType],
 				0,
 				numVertices - 1,
 				XNAToGL.PrimitiveVerts(primitiveType, primitiveCount),
-				shortIndices ?
-					GLenum.GL_UNSIGNED_SHORT :
-					GLenum.GL_UNSIGNED_INT,
+				XNAToGL.IndexType[(int) indexElementSize],
 				(IntPtr) (
 					indexData.ToInt64() +
-					(indexOffset * (shortIndices ? 2 : 4))
+					(indexOffset * XNAToGL.IndexSize[(int) indexElementSize])
 				)
 			);
 		}
@@ -1906,6 +1902,11 @@ namespace Microsoft.Xna.Framework.Graphics
 			bool bindingsUpdated,
 			int baseVertex
 		) {
+			if (supportsBaseVertex)
+			{
+				baseVertex = 0;
+			}
+
 			if (	bindingsUpdated ||
 				baseVertex != ldBaseVertex ||
 				currentEffect != ldEffect ||
@@ -2138,7 +2139,7 @@ namespace Microsoft.Xna.Framework.Graphics
 
 			result = new OpenGLBuffer(
 				handle,
-				(IntPtr) (indexCount * (indexElementSize == IndexElementSize.SixteenBits ? 2 : 4)),
+				(IntPtr) (indexCount * XNAToGL.IndexSize[(int) indexElementSize]),
 				dynamic ? GLenum.GL_STREAM_DRAW : GLenum.GL_STATIC_DRAW
 			);
 
@@ -2185,15 +2186,15 @@ namespace Microsoft.Xna.Framework.Graphics
 
 		#region glSetBufferData Methods
 
-		public void SetVertexBufferData<T>(
+		public void SetVertexBufferData(
 			IGLBuffer buffer,
-			int elementSizeInBytes,
 			int offsetInBytes,
-			T[] data,
+			IntPtr data,
 			int startIndex,
 			int elementCount,
+			int elementSizeInBytes,
 			SetDataOptions options
-		) where T : struct {
+		) {
 #if !DISABLE_THREADING
 			ForceToMainThread(() => {
 #endif
@@ -2210,30 +2211,27 @@ namespace Microsoft.Xna.Framework.Graphics
 				);
 			}
 
-			GCHandle dataHandle = GCHandle.Alloc(data, GCHandleType.Pinned);
-
 			glBufferSubData(
 				GLenum.GL_ARRAY_BUFFER,
 				(IntPtr) offsetInBytes,
 				(IntPtr) (elementSizeInBytes * elementCount),
-				(IntPtr) (dataHandle.AddrOfPinnedObject().ToInt64() + startIndex * elementSizeInBytes)
+				data + (startIndex * elementSizeInBytes)
 			);
-
-			dataHandle.Free();
 
 #if !DISABLE_THREADING
 			});
 #endif
 		}
 
-		public void SetIndexBufferData<T>(
+		public void SetIndexBufferData(
 			IGLBuffer buffer,
 			int offsetInBytes,
-			T[] data,
+			IntPtr data,
 			int startIndex,
 			int elementCount,
+			int elementSizeInBytes,
 			SetDataOptions options
-		) where T : struct {
+		) {
 #if !DISABLE_THREADING
 			ForceToMainThread(() => {
 #endif
@@ -2250,17 +2248,12 @@ namespace Microsoft.Xna.Framework.Graphics
 				);
 			}
 
-			GCHandle dataHandle = GCHandle.Alloc(data, GCHandleType.Pinned);
-
-			int elementSizeInBytes = Marshal.SizeOf(typeof(T));
 			glBufferSubData(
 				GLenum.GL_ELEMENT_ARRAY_BUFFER,
 				(IntPtr) offsetInBytes,
 				(IntPtr) (elementSizeInBytes * elementCount),
-				(IntPtr) (dataHandle.AddrOfPinnedObject().ToInt64() + startIndex * elementSizeInBytes)
+				data + (startIndex * elementSizeInBytes)
 			);
-
-			dataHandle.Free();
 
 #if !DISABLE_THREADING
 			});
@@ -2271,60 +2264,53 @@ namespace Microsoft.Xna.Framework.Graphics
 
 		#region glGetBufferData Methods
 
-		public void GetVertexBufferData<T>(
+		public void GetVertexBufferData(
 			IGLBuffer buffer,
 			int offsetInBytes,
-			T[] data,
+			IntPtr data,
 			int startIndex,
 			int elementCount,
+			int elementSizeInBytes,
 			int vertexStride
-		) where T : struct {
+		) {
 #if !DISABLE_THREADING
 			ForceToMainThread(() => {
 #endif
 
 			BindVertexBuffer(buffer);
 
-			GCHandle dataHandle = GCHandle.Alloc(data, GCHandleType.Pinned);
-
 			glGetBufferSubData(
 				GLenum.GL_ARRAY_BUFFER,
 				(IntPtr) offsetInBytes,
 				(IntPtr) (elementCount * vertexStride),
-				dataHandle.AddrOfPinnedObject() + (startIndex * Marshal.SizeOf(typeof(T)))
+				data + (startIndex * elementSizeInBytes)
 			);
-
-			dataHandle.Free();
 
 #if !DISABLE_THREADING
 			});
 #endif
 		}
 
-		public void GetIndexBufferData<T>(
+		public void GetIndexBufferData(
 			IGLBuffer buffer,
 			int offsetInBytes,
-			T[] data,
+			IntPtr data,
 			int startIndex,
-			int elementCount
-		) where T : struct {
+			int elementCount,
+			int elementSizeInBytes
+		) {
 #if !DISABLE_THREADING
 			ForceToMainThread(() => {
 #endif
 
 			BindIndexBuffer(buffer);
 
-			GCHandle dataHandle = GCHandle.Alloc(data, GCHandleType.Pinned);
-
-			int typeSize = Marshal.SizeOf(typeof(T));
 			glGetBufferSubData(
 				GLenum.GL_ELEMENT_ARRAY_BUFFER,
 				(IntPtr) offsetInBytes,
-				(IntPtr) (elementCount * typeSize),
-				dataHandle.AddrOfPinnedObject() + (startIndex * typeSize)
+				(IntPtr) (elementCount * elementSizeInBytes),
+				data + (startIndex * elementSizeInBytes)
 			);
-
-			dataHandle.Free();
 
 #if !DISABLE_THREADING
 			});
@@ -2608,7 +2594,7 @@ namespace Microsoft.Xna.Framework.Graphics
 
 		#region glTexSubImage Methods
 
-		public void SetTextureData2D<T>(
+		public void SetTextureData2D(
 			IGLTexture texture,
 			SurfaceFormat format,
 			int x,
@@ -2616,90 +2602,69 @@ namespace Microsoft.Xna.Framework.Graphics
 			int w,
 			int h,
 			int level,
-			T[] data,
+			IntPtr data,
 			int startIndex,
-			int elementCount
-		) where T : struct {
+			int elementCount,
+			int elementSizeInBytes
+		) {
 #if !DISABLE_THREADING
 			ForceToMainThread(() => {
 #endif
 			BindTexture(texture);
 
-			GCHandle dataHandle = GCHandle.Alloc(data, GCHandleType.Pinned);
-			int elementSizeInBytes = Marshal.SizeOf(typeof(T));
-			int startByte = startIndex * elementSizeInBytes;
-			IntPtr dataPtr = (IntPtr) (dataHandle.AddrOfPinnedObject().ToInt64() + startByte);
-
 			GLenum glFormat = XNAToGL.TextureFormat[(int) format];
-			try
+			if (glFormat == GLenum.GL_COMPRESSED_TEXTURE_FORMATS)
 			{
-				if (glFormat == GLenum.GL_COMPRESSED_TEXTURE_FORMATS)
-				{
-					int dataLength;
-					if (elementCount > 0)
-					{
-						dataLength = elementCount * elementSizeInBytes;
-					}
-					else
-					{
-						dataLength = data.Length - startByte;
-					}
-
-					/* Note that we're using glInternalFormat, not glFormat.
-					 * In this case, they should actually be the same thing,
-					 * but we use glFormat somewhat differently for
-					 * compressed textures.
-					 * -flibit
-					 */
-					glCompressedTexSubImage2D(
-						GLenum.GL_TEXTURE_2D,
-						level,
-						x,
-						y,
-						w,
-						h,
-						XNAToGL.TextureInternalFormat[(int) format],
-						dataLength,
-						dataPtr
-					);
-				}
-				else
-				{
-					// Set pixel alignment to match texel size in bytes
-					int packSize = Texture.GetFormatSize(format);
-					if (packSize != 4)
-					{
-						glPixelStorei(
-							GLenum.GL_UNPACK_ALIGNMENT,
-							packSize
-						);
-					}
-
-					glTexSubImage2D(
-						GLenum.GL_TEXTURE_2D,
-						level,
-						x,
-						y,
-						w,
-						h,
-						glFormat,
-						XNAToGL.TextureDataType[(int) format],
-						dataPtr
-					);
-
-					// Keep this state sane -flibit
-					if (packSize != 4)
-					{
-						glPixelStorei(
-							GLenum.GL_UNPACK_ALIGNMENT,
-							4
-						);
-					}
-				}
+				/* Note that we're using glInternalFormat, not glFormat.
+				 * In this case, they should actually be the same thing,
+				 * but we use glFormat somewhat differently for
+				 * compressed textures.
+				 * -flibit
+				 */
+				glCompressedTexSubImage2D(
+					GLenum.GL_TEXTURE_2D,
+					level,
+					x,
+					y,
+					w,
+					h,
+					XNAToGL.TextureInternalFormat[(int) format],
+					elementCount * elementSizeInBytes,
+					data + (startIndex * elementSizeInBytes)
+				);
 			}
-			finally
+			else
 			{
-				dataHandle.Free();
+				// Set pixel alignment to match texel size in bytes
+				int packSize = Texture.GetFormatSize(format);
+				if (packSize != 4)
+				{
+					glPixelStorei(
+						GLenum.GL_UNPACK_ALIGNMENT,
+						packSize
+					);
+				}
+
+				glTexSubImage2D(
+					GLenum.GL_TEXTURE_2D,
+					level,
+					x,
+					y,
+					w,
+					h,
+					glFormat,
+					XNAToGL.TextureDataType[(int) format],
+					data + (startIndex * elementSizeInBytes)
+				);
+
+				// Keep this state sane -flibit
+				if (packSize != 4)
+				{
+					glPixelStorei(
+						GLenum.GL_UNPACK_ALIGNMENT,
+						4
+					);
+				}
 			}
 
 #if !DISABLE_THREADING
@@ -2707,7 +2672,7 @@ namespace Microsoft.Xna.Framework.Graphics
 #endif
 		}
 
-		public void SetTextureData3D<T>(
+		public void SetTextureData3D(
 			IGLTexture texture,
 			SurfaceFormat format,
 			int level,
@@ -2717,43 +2682,36 @@ namespace Microsoft.Xna.Framework.Graphics
 			int bottom,
 			int front,
 			int back,
-			T[] data,
+			IntPtr data,
 			int startIndex,
-			int elementCount
-		) where T : struct {
+			int elementCount,
+			int elementSizeInBytes
+		) {
 #if !DISABLE_THREADING
 			ForceToMainThread(() => {
 #endif
 			BindTexture(texture);
 
-			GCHandle dataHandle = GCHandle.Alloc(data, GCHandleType.Pinned);
-			try
-			{
-				glTexSubImage3D(
-					GLenum.GL_TEXTURE_3D,
-					level,
-					left,
-					top,
-					front,
-					right - left,
-					bottom - top,
-					back - front,
-					XNAToGL.TextureFormat[(int) format],
-					XNAToGL.TextureDataType[(int) format],
-					(IntPtr) (dataHandle.AddrOfPinnedObject().ToInt64() + startIndex * Marshal.SizeOf(typeof(T)))
-				);
-			}
-			finally
-			{
-				dataHandle.Free();
-			}
+			glTexSubImage3D(
+				GLenum.GL_TEXTURE_3D,
+				level,
+				left,
+				top,
+				front,
+				right - left,
+				bottom - top,
+				back - front,
+				XNAToGL.TextureFormat[(int) format],
+				XNAToGL.TextureDataType[(int) format],
+				data + (startIndex * elementSizeInBytes)
+			);
 
 #if !DISABLE_THREADING
 			});
 #endif
 		}
 
-		public void SetTextureDataCube<T>(
+		public void SetTextureDataCube(
 			IGLTexture texture,
 			SurfaceFormat format,
 			int xOffset,
@@ -2762,71 +2720,50 @@ namespace Microsoft.Xna.Framework.Graphics
 			int height,
 			CubeMapFace cubeMapFace,
 			int level,
-			T[] data,
+			IntPtr data,
 			int startIndex,
-			int elementCount
-		) where T : struct {
+			int elementCount,
+			int elementSizeInBytes
+		) {
 #if !DISABLE_THREADING
 			ForceToMainThread(() => {
 #endif
 			BindTexture(texture);
 
-			GCHandle dataHandle = GCHandle.Alloc(data, GCHandleType.Pinned);
-			int elementSizeInBytes = Marshal.SizeOf(typeof(T));
-			int startByte = startIndex * elementSizeInBytes;
-			IntPtr dataPtr = (IntPtr) (dataHandle.AddrOfPinnedObject().ToInt64() + startByte);
-
 			GLenum glFormat = XNAToGL.TextureFormat[(int) format];
-			try
+			if (glFormat == GLenum.GL_COMPRESSED_TEXTURE_FORMATS)
 			{
-				if (glFormat == GLenum.GL_COMPRESSED_TEXTURE_FORMATS)
-				{
-					int dataLength;
-					if (elementCount > 0)
-					{
-						dataLength = elementCount * elementSizeInBytes;
-					}
-					else
-					{
-						dataLength = data.Length - startByte;
-					}
-
-					/* Note that we're using glInternalFormat, not glFormat.
-					 * In this case, they should actually be the same thing,
-					 * but we use glFormat somewhat differently for
-					 * compressed textures.
-					 * -flibit
-					 */
-					glCompressedTexSubImage2D(
-						GLenum.GL_TEXTURE_CUBE_MAP_POSITIVE_X + (int) cubeMapFace,
-						level,
-						xOffset,
-						yOffset,
-						width,
-						height,
-						XNAToGL.TextureInternalFormat[(int) format],
-						dataLength,
-						dataPtr
-					);
-				}
-				else
-				{
-					glTexSubImage2D(
-						GLenum.GL_TEXTURE_CUBE_MAP_POSITIVE_X + (int) cubeMapFace,
-						level,
-						xOffset,
-						yOffset,
-						width,
-						height,
-						glFormat,
-						XNAToGL.TextureDataType[(int) format],
-						dataPtr
-					);
-				}
+				/* Note that we're using glInternalFormat, not glFormat.
+				 * In this case, they should actually be the same thing,
+				 * but we use glFormat somewhat differently for
+				 * compressed textures.
+				 * -flibit
+				 */
+				glCompressedTexSubImage2D(
+					GLenum.GL_TEXTURE_CUBE_MAP_POSITIVE_X + (int) cubeMapFace,
+					level,
+					xOffset,
+					yOffset,
+					width,
+					height,
+					XNAToGL.TextureInternalFormat[(int) format],
+					elementCount * elementSizeInBytes,
+					data + (startIndex * elementSizeInBytes)
+				);
 			}
-			finally
+			else
 			{
-				dataHandle.Free();
+				glTexSubImage2D(
+					GLenum.GL_TEXTURE_CUBE_MAP_POSITIVE_X + (int) cubeMapFace,
+					level,
+					xOffset,
+					yOffset,
+					width,
+					height,
+					glFormat,
+					XNAToGL.TextureDataType[(int) format],
+					data + (startIndex * elementSizeInBytes)
+				);
 			}
 
 #if !DISABLE_THREADING
@@ -2870,17 +2807,18 @@ namespace Microsoft.Xna.Framework.Graphics
 
 		#region glGetTexImage Methods
 
-		public void GetTextureData2D<T>(
+		public void GetTextureData2D(
 			IGLTexture texture,
 			SurfaceFormat format,
 			int width,
 			int height,
 			int level,
 			Rectangle? rect,
-			T[] data,
+			IntPtr data,
 			int startIndex,
-			int elementCount
-		) where T : struct {
+			int elementCount,
+			int elementSizeInBytes
+		) {
 #if !DISABLE_THREADING
 			ForceToMainThread(() => {
 #endif
@@ -2905,41 +2843,25 @@ namespace Microsoft.Xna.Framework.Graphics
 			else if (rect == null)
 			{
 				// Just throw the whole texture into the user array.
-				GCHandle ptr = GCHandle.Alloc(data, GCHandleType.Pinned);
-				try
-				{
-					glGetTexImage(
-						GLenum.GL_TEXTURE_2D,
-						0,
-						glFormat,
-						XNAToGL.TextureDataType[(int) format],
-						ptr.AddrOfPinnedObject()
-					);
-				}
-				finally
-				{
-					ptr.Free();
-				}
+				glGetTexImage(
+					GLenum.GL_TEXTURE_2D,
+					0,
+					glFormat,
+					XNAToGL.TextureDataType[(int) format],
+					data
+				);
 			}
 			else
 			{
 				// Get the whole texture...
-				T[] texData = new T[width * height];
-				GCHandle ptr = GCHandle.Alloc(texData, GCHandleType.Pinned);
-				try
-				{
-					glGetTexImage(
-						GLenum.GL_TEXTURE_2D,
-						0,
-						glFormat,
-						XNAToGL.TextureDataType[(int) format],
-						ptr.AddrOfPinnedObject()
-					);
-				}
-				finally
-				{
-					ptr.Free();
-				}
+				IntPtr texData = Marshal.AllocHGlobal(width * height * elementSizeInBytes);
+				glGetTexImage(
+					GLenum.GL_TEXTURE_2D,
+					0,
+					glFormat,
+					XNAToGL.TextureDataType[(int) format],
+					texData
+				);
 
 				// Now, blit the rect region into the user array.
 				Rectangle region = rect.Value;
@@ -2959,9 +2881,15 @@ namespace Microsoft.Xna.Framework.Graphics
 							// If we're past the end, we're done!
 							return;
 						}
-						data[curPixel - startIndex] = texData[(row * width) + col];
+						// FIXME: Can we copy via pitch instead, or something? -flibit
+						memcpy(
+							data + ((curPixel - startIndex) * elementSizeInBytes),
+							texData + (((row * width) + col) * elementSizeInBytes),
+							(IntPtr) elementSizeInBytes
+						);
 					}
 				}
+				Marshal.FreeHGlobal(texData);
 			}
 
 #if !DISABLE_THREADING
@@ -2969,17 +2897,18 @@ namespace Microsoft.Xna.Framework.Graphics
 #endif
 		}
 
-		public void GetTextureDataCube<T>(
+		public void GetTextureDataCube(
 			IGLTexture texture,
 			SurfaceFormat format,
 			int size,
 			CubeMapFace cubeMapFace,
 			int level,
 			Rectangle? rect,
-			T[] data,
+			IntPtr data,
 			int startIndex,
-			int elementCount
-		) where T : struct {
+			int elementCount,
+			int elementSizeInBytes
+		) {
 #if !DISABLE_THREADING
 			ForceToMainThread(() => {
 #endif
@@ -2993,41 +2922,25 @@ namespace Microsoft.Xna.Framework.Graphics
 			else if (rect == null)
 			{
 				// Just throw the whole texture into the user array.
-				GCHandle ptr = GCHandle.Alloc(data, GCHandleType.Pinned);
-				try
-				{
-					glGetTexImage(
-						GLenum.GL_TEXTURE_CUBE_MAP_POSITIVE_X + (int) cubeMapFace,
-						0,
-						glFormat,
-						XNAToGL.TextureDataType[(int) format],
-						ptr.AddrOfPinnedObject()
-					);
-				}
-				finally
-				{
-					ptr.Free();
-				}
+				glGetTexImage(
+					GLenum.GL_TEXTURE_CUBE_MAP_POSITIVE_X + (int) cubeMapFace,
+					0,
+					glFormat,
+					XNAToGL.TextureDataType[(int) format],
+					data
+				);
 			}
 			else
 			{
 				// Get the whole texture...
-				T[] texData = new T[size * size];
-				GCHandle ptr = GCHandle.Alloc(texData, GCHandleType.Pinned);
-				try
-				{
-					glGetTexImage(
-						GLenum.GL_TEXTURE_CUBE_MAP_POSITIVE_X + (int) cubeMapFace,
-						0,
-						glFormat,
-						XNAToGL.TextureDataType[(int) format],
-						ptr.AddrOfPinnedObject()
-					);
-				}
-				finally
-				{
-					ptr.Free();
-				}
+				IntPtr texData = Marshal.AllocHGlobal(size * size * elementSizeInBytes);
+				glGetTexImage(
+					GLenum.GL_TEXTURE_CUBE_MAP_POSITIVE_X + (int) cubeMapFace,
+					0,
+					glFormat,
+					XNAToGL.TextureDataType[(int) format],
+					texData
+				);
 
 				// Now, blit the rect region into the user array.
 				Rectangle region = rect.Value;
@@ -3047,9 +2960,15 @@ namespace Microsoft.Xna.Framework.Graphics
 							// If we're past the end, we're done!
 							return;
 						}
-						data[curPixel - startIndex] = texData[(row * size) + col];
+						// FIXME: Can we copy via pitch instead, or something? -flibit
+						memcpy(
+							data + ((curPixel - startIndex) * elementSizeInBytes),
+							texData + (((row * size) + col) * elementSizeInBytes),
+							(IntPtr) elementSizeInBytes
+						);
 					}
 				}
+				Marshal.FreeHGlobal(texData);
 			}
 
 #if !DISABLE_THREADING
@@ -3100,13 +3019,26 @@ namespace Microsoft.Xna.Framework.Graphics
 
 		#region glReadPixels Methods
 
-		public void ReadBackbuffer<T>(
-			T[] data,
+		public void ReadBackbuffer(
+			IntPtr data,
+			int dataLen,
 			int startIndex,
 			int elementCount,
+			int elementSizeInBytes,
 			Rectangle? rect
-		) where T : struct {
-			if (startIndex > 0 || elementCount != data.Length)
+		) {
+			/* FIXME: Right now we're expecting one of the following:
+			 * - byte[]
+			 * - int[]
+			 * - uint[]
+			 * - Color[]
+			 * Anything else will freak out because we're using
+			 * color backbuffers. Maybe check this out when adding
+			 * support for more backbuffer types!
+			 * -flibit
+			 */
+
+			if (startIndex > 0 || elementCount != (dataLen / elementSizeInBytes))
 			{
 				throw new NotImplementedException(
 					"ReadBackbuffer startIndex/elementCount"
@@ -3139,35 +3071,29 @@ namespace Microsoft.Xna.Framework.Graphics
 				h = Backbuffer.Height;
 			}
 
-			GCHandle handle = GCHandle.Alloc(data, GCHandleType.Pinned);
-			try
-			{
-				glReadPixels(
-					x,
-					y,
-					w,
-					h,
-					GLenum.GL_RGBA,
-					GLenum.GL_UNSIGNED_BYTE,
-					handle.AddrOfPinnedObject()
-				);
-			}
-			finally
-			{
-				handle.Free();
-			}
+			glReadPixels(
+				x,
+				y,
+				w,
+				h,
+				GLenum.GL_RGBA,
+				GLenum.GL_UNSIGNED_BYTE,
+				data
+			);
 
 			BindReadFramebuffer(prevReadBuffer);
 
 			// Now we get to do a software-based flip! Yes, really! -flibit
-			int pitch = w * 4 / Marshal.SizeOf(typeof(T));
-			T[] tempRow = new T[pitch];
+			int pitch = w * 4;
+			IntPtr temp = Marshal.AllocHGlobal(pitch);
 			for (int row = 0; row < h / 2; row += 1)
 			{
-				Array.Copy(data, row * pitch, tempRow, 0, pitch);
-				Array.Copy(data, (h - row - 1) * pitch, data, row * pitch, pitch);
-				Array.Copy(tempRow, 0, data, (h - row - 1) * pitch, pitch);
+				// Top to temp, bottom to top, temp to bottom
+				memcpy(temp, data + (row * pitch), (IntPtr) pitch);
+				memcpy(data + (row * pitch), data + ((h - row - 1) * pitch), (IntPtr) pitch);
+				memcpy(data + ((h - row - 1) * pitch), temp, (IntPtr) pitch);
 			}
+			Marshal.FreeHGlobal(temp);
 		}
 
 		/// <summary>
@@ -3181,14 +3107,14 @@ namespace Microsoft.Xna.Framework.Graphics
 		/// <param name="data">The texture data array</param>
 		/// <param name="rect">The portion of the image to read from</param>
 		/// <returns>True if we successfully read the texture data</returns>
-		private bool ReadTargetIfApplicable<T>(
+		private bool ReadTargetIfApplicable(
 			IGLTexture texture,
 			int width,
 			int height,
 			int level,
-			T[] data,
+			IntPtr data,
 			Rectangle? rect
-		) where T : struct {
+		) {
 			bool texUnbound = (	currentDrawBuffers != 1 ||
 						currentAttachments[0] != (texture as OpenGLTexture).Handle	);
 			if (texUnbound && !useES2)
@@ -3236,23 +3162,15 @@ namespace Microsoft.Xna.Framework.Graphics
 			/* glReadPixels should be faster than reading
 			 * back from the render target if we are already bound.
 			 */
-			GCHandle handle = GCHandle.Alloc(data, GCHandleType.Pinned);
-			try
-			{
-				glReadPixels(
-					x,
-					y,
-					w,
-					h,
-					GLenum.GL_RGBA, // FIXME: Assumption!
-					GLenum.GL_UNSIGNED_BYTE,
-					handle.AddrOfPinnedObject()
-				);
-			}
-			finally
-			{
-				handle.Free();
-			}
+			glReadPixels(
+				x,
+				y,
+				w,
+				h,
+				GLenum.GL_RGBA, // FIXME: Assumption!
+				GLenum.GL_UNSIGNED_BYTE,
+				data
+			);
 
 			if (texUnbound)
 			{
@@ -3543,12 +3461,13 @@ namespace Microsoft.Xna.Framework.Graphics
 				glDisable(GLenum.GL_SCISSOR_TEST);
 			}
 
+			bool clearTarget = (options & ClearOptions.Target) == ClearOptions.Target;
 			bool clearDepth = (options & ClearOptions.DepthBuffer) == ClearOptions.DepthBuffer;
 			bool clearStencil = (options & ClearOptions.Stencil) == ClearOptions.Stencil;
 
 			// Get the clear mask, set the clear properties if needed
 			GLenum clearMask = GLenum.GL_ZERO;
-			if ((options & ClearOptions.Target) == ClearOptions.Target)
+			if (clearTarget)
 			{
 				clearMask |= GLenum.GL_COLOR_BUFFER_BIT;
 				if (!color.Equals(currentClearColor))
@@ -3606,7 +3525,7 @@ namespace Microsoft.Xna.Framework.Graphics
 			{
 				glEnable(GLenum.GL_SCISSOR_TEST);
 			}
-			if (colorWriteEnable != ColorWriteChannels.All)
+			if (clearTarget && colorWriteEnable != ColorWriteChannels.All)
 			{
 				// FIXME: ColorWriteChannels1/2/3? -flibit
 				glColorMask(
@@ -4117,7 +4036,7 @@ namespace Microsoft.Xna.Framework.Graphics
 					4,	// VertexElementFormat.Color
 					4,	// VertexElementFormat.Byte4
 					2,	// VertexElementFormat.Short2
-					2,	// VertexElementFormat.Short4
+					4,	// VertexElementFormat.Short4
 					2,	// VertexElementFormat.NormalizedShort2
 					4,	// VertexElementFormat.NormalizedShort4
 					2,	// VertexElementFormat.HalfVector2
@@ -4146,6 +4065,18 @@ namespace Microsoft.Xna.Framework.Graphics
 						element.VertexElementFormat == VertexElementFormat.NormalizedShort2 ||
 						element.VertexElementFormat == VertexElementFormat.NormalizedShort4	);
 			}
+
+			public static readonly GLenum[] IndexType = new GLenum[]
+			{
+				GLenum.GL_UNSIGNED_SHORT,	// IndexElementSize.SixteenBits
+				GLenum.GL_UNSIGNED_INT		// IndexElementSize.ThirtyTwoBits
+			};
+
+			public static readonly int[] IndexSize = new int[]
+			{
+				2,	// IndexElementSize.SixteenBits
+				4	// IndexElementSize.ThirtyTwoBits
+			};
 
 			public static readonly GLenum[] Primitive = new GLenum[]
 			{
